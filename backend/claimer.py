@@ -12,13 +12,15 @@ _stop = threading.Event()
 def claim_once() -> bool:
     db = SessionLocal()
     try:
-        row = (
+        q = (
             db.query(ConvergenceLog)
             .filter(ConvergenceLog.status == "pending")
             .order_by(ConvergenceLog.id)
-            .with_for_update(skip_locked=True)
-            .first()
         )
+        # skip_locked 仅 Postgres 支持；本地 sqlite 冒烟时退化为普通查询
+        if db.get_bind().dialect.name == "postgresql":
+            q = q.with_for_update(skip_locked=True)
+        row = q.first()
         if row is None:
             db.commit()
             return False
