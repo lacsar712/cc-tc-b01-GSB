@@ -8,6 +8,7 @@ from passlib.context import CryptContext
 
 from claimer import start as start_claimer
 from models import Base, ConvergenceLog, SessionLocal, engine, row_dict
+import rate_service
 
 SECRET = os.environ.get("JWT_SECRET", "tunnelconv-dev-secret")
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -41,6 +42,22 @@ def seed():
                     created_by="surveyor",
                     created_at=now,
                     processed_at=now,
+                )
+            )
+        # 连续三周抬高、且都已办结的断面：最小二乘斜率应为正（0.6 mm/周）。
+        for weeks_ago, delta in ((2, 0.6), (1, 1.2), (0, 1.8)):
+            ts = now - timedelta(weeks=weeks_ago)
+            verdict, reason = judge(delta)
+            db.add(
+                ConvergenceLog(
+                    chainage="K30+010",
+                    delta_mm=delta,
+                    status="done",
+                    verdict=verdict,
+                    reason=reason,
+                    created_by="surveyor",
+                    created_at=ts,
+                    processed_at=ts,
                 )
             )
         db.commit()
@@ -147,5 +164,47 @@ def create_log():
         db.commit()
         db.refresh(row)
         return jsonify(row_dict(row)), 201
+    finally:
+        db.close()
+
+
+@app.get("/api/rate/sections")
+@require_login
+def rate_sections():
+    """速率专页中块：按断面列出拟合速率与样本点（pending 点不在其中）。"""
+    db = SessionLocal()
+    try:
+        return jsonify(rate_service.collect_sections(db))
+    finally:
+        db.close()
+
+
+@app.put("/api/rate/window")
+@require_writer
+def update_rate_window():
+    """上块拖拽窗口落库。仅测量员；带 version 乐观锁，并发落败返回 409。
+
+    巡检员（reader）在 require_writer 即被拦下（403），既改不了也无法借接口"上报"。
+    """
+    body = request.get_json(silent=True) or {}
+    chainage = (body.get("chainage") or "").strip()
+    start_at = body.get("start_at")
+    end_at = body.get("end_at")
+    expected_version = body.get("version")
+
+    db = SessionLocal()
+    try:
+        window, error = rate_service.upsert_window(
+            db, chainage, start_at, end_at, expected_version, g.user["username"]
+        )
+        if error is None:
+            return jsonify(window), 200
+        code, payload = error
+        if code == "bad_request":
+            return jsonify({"detail": payload}), 400
+        # conflict：409 并回带服务器现存的那一笔，前端据此对齐。
+        return jsonify(
+            {"detail": "该断面窗口刚被他人更新，已为你加载最新一笔", "current": payload}
+        ), 409
     finally:
         db.close()

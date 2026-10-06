@@ -1,4 +1,7 @@
 <script>
+  import { onMount } from "svelte";
+  import RatePage from "./RatePage.svelte";
+
   let session = null;
   let logs = [];
   let loginUser = "surveyor";
@@ -8,6 +11,12 @@
   let error = "";
   let loading = false;
   let timer;
+  let route = window.location.hash === "#/rate" ? "rate" : "home";
+
+  function onHash() {
+    route = window.location.hash === "#/rate" ? "rate" : "home";
+  }
+  onMount(() => window.addEventListener("hashchange", onHash));
 
   $: isWriter = session?.role === "writer";
 
@@ -101,8 +110,21 @@
     color: #f5f5f4;
   }
   main { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
-  h1 { color: #fbbf24; margin: 0 0 0.25rem; }
+  h1 { color: #fbbf24; margin: 0; font-size: 1.35rem; }
   .sub { color: #a8a29e; margin-bottom: 1.25rem; }
+  header.topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem; flex-wrap: wrap; margin-bottom: 1.1rem;
+    border-bottom: 1px solid #44403c; padding-bottom: 0.8rem;
+  }
+  nav.tabs { display: flex; gap: 0.4rem; }
+  nav.tabs a {
+    color: #d6d3d1; text-decoration: none; font-size: 0.9rem;
+    padding: 0.4rem 0.85rem; border-radius: 6px; border: 1px solid transparent;
+  }
+  nav.tabs a.active { background: #d97706; color: #fff; font-weight: 600; }
+  nav.tabs a:not(.active):hover { background: #292524; }
+  .who { color: #a8a29e; font-size: 0.85rem; display: flex; align-items: center; gap: 0.6rem; }
   section {
     background: #292524; border: 1px solid #44403c; border-radius: 8px;
     padding: 1rem 1.25rem; margin-bottom: 1rem;
@@ -139,43 +161,53 @@
       {#if error}<p class="err">{error}</p>{/if}
     </section>
   {:else}
-    <p class="sub">已登录：{session.username}（{isWriter ? "可提交" : "只读"}）</p>
-    <section>
-      <button class="secondary" on:click={logout}>退出</button>
-      <button class="secondary" disabled={loading} on:click={refresh}>刷新列表</button>
-    </section>
-    {#if isWriter}
+    <header class="topbar">
+      <nav class="tabs">
+        <a href="#/home" class={route === "home" ? "active" : ""}>读数总表</a>
+        <a href="#/rate" class={route === "rate" ? "active" : ""}>周进尺速率</a>
+      </nav>
+      <div class="who">
+        <span>{session.username}（{isWriter ? "测量员·可提交" : "巡检员·只读"}）</span>
+        <button class="secondary" on:click={logout}>退出</button>
+      </div>
+    </header>
+
+    {#if route === "home"}
+      {#if isWriter}
+        <section>
+          <label>里程桩号</label>
+          <input placeholder="例如 K20+050" bind:value={chainage} />
+          <label>收敛（毫米，可正可负）</label>
+          <input type="number" step="0.1" bind:value={deltaMm} />
+          <button disabled={loading} on:click={submit}>提交（进入待认领）</button>
+          {#if error}<p class="err">{error}</p>{/if}
+        </section>
+      {/if}
       <section>
-        <label>里程桩号</label>
-        <input placeholder="例如 K20+050" bind:value={chainage} />
-        <label>收敛（毫米，可正可负）</label>
-        <input type="number" step="0.1" bind:value={deltaMm} />
-        <button disabled={loading} on:click={submit}>提交（进入待认领）</button>
-        {#if error}<p class="err">{error}</p>{/if}
+        <table>
+          <thead>
+            <tr><th>编号</th><th>桩号</th><th>收敛mm</th><th>状态</th><th>结论</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            {#each logs as row}
+              <tr>
+                <td>{row.id}</td>
+                <td>{row.chainage}</td>
+                <td>{row.delta_mm}</td>
+                <td><span class="tag {row.status === 'pending' ? 'pending' : 'ok'}">{row.status === 'pending' ? '待处理' : '已完成'}</span></td>
+                <td>
+                  {#if row.verdict}
+                    <span class="tag {row.verdict === '合格' ? 'ok' : 'bad'}">{row.verdict}</span>
+                  {:else}—{/if}
+                </td>
+                <td>{row.reason ?? "—"}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       </section>
+    {:else}
+      <RatePage {session} onUnauth={logout} />
     {/if}
-    <section>
-      <table>
-        <thead>
-          <tr><th>编号</th><th>桩号</th><th>收敛mm</th><th>状态</th><th>结论</th><th>说明</th></tr>
-        </thead>
-        <tbody>
-          {#each logs as row}
-            <tr>
-              <td>{row.id}</td>
-              <td>{row.chainage}</td>
-              <td>{row.delta_mm}</td>
-              <td><span class="tag {row.status === 'pending' ? 'pending' : 'ok'}">{row.status === 'pending' ? '待处理' : '已完成'}</span></td>
-              <td>
-                {#if row.verdict}
-                  <span class="tag {row.verdict === '合格' ? 'ok' : 'bad'}">{row.verdict}</span>
-                {:else}—{/if}
-              </td>
-              <td>{row.reason ?? "—"}</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </section>
   {/if}
 </main>
